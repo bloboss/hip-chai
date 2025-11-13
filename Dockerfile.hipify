@@ -1,0 +1,84 @@
+# Dockerfile for HIP porting with hipify-clang
+# This container provides the hipify-clang utility for converting CUDA code to HIP
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set ROCm version
+ARG ROCM_VERSION=6.0
+ENV ROCM_VERSION=${ROCM_VERSION}
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg2 \
+    software-properties-common \
+    ca-certificates \
+    apt-utils \
+    curl \
+    git \
+    make \
+    cmake \
+    build-essential \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROCm repository
+RUN wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
+    echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" | tee /etc/apt/sources.list.d/rocm.list
+
+# Install ROCm and HIP tools
+RUN apt-get update && apt-get install -y \
+    rocm-dev \
+    rocm-utils \
+    hip-dev \
+    hipify-clang \
+    rocm-llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for ROCm/HIP
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}
+ENV HIP_PATH=/opt/rocm/hip
+ENV ROCM_PATH=/opt/rocm
+ENV HIP_PLATFORM=amd
+
+# Create working directory
+WORKDIR /workspace
+
+# Copy the repository
+COPY . /workspace/
+
+# Create a helper script for batch conversion
+RUN echo '#!/bin/bash\n\
+# Helper script for converting CUDA files to HIP\n\
+# Usage: ./hipify_directory.sh <input_dir> <output_dir>\n\
+\n\
+INPUT_DIR=${1:-.}\n\
+OUTPUT_DIR=${2:-.}\n\
+\n\
+echo "Converting CUDA files in ${INPUT_DIR} to HIP..."\n\
+\n\
+# Find all .cu and .cuh files\n\
+find "${INPUT_DIR}" -type f \( -name "*.cu" -o -name "*.cuh" \) | while read -r file; do\n\
+    # Get relative path\n\
+    rel_path="${file#${INPUT_DIR}/}"\n\
+    output_file="${OUTPUT_DIR}/${rel_path}"\n\
+    output_dir=$(dirname "${output_file}")\n\
+    \n\
+    # Create output directory if it does not exist\n\
+    mkdir -p "${output_dir}"\n\
+    \n\
+    # Convert CUDA to HIP\n\
+    echo "Converting: ${file} -> ${output_file}"\n\
+    hipify-clang "${file}" -o "${output_file}" -- -std=c++11 -x cuda\n\
+done\n\
+\n\
+echo "Conversion complete!"\n\
+' > /usr/local/bin/hipify_directory.sh && chmod +x /usr/local/bin/hipify_directory.sh
+
+# Set default command
+CMD ["/bin/bash"]

@@ -1,0 +1,77 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+!README.md
+!HIP-CONVERSION-SUMMARY.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts (keep in host, not in image)
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Backup files
+*.bak
+*~
+.*.bak
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Test results
+test-results/
+build.log
+
+# CUDA original files (we only need HIP)
+CUDA-D/
+CUDA-U/
+CUDA-D-Sim/
+CUDA-U-Sim/
+
+# Other implementations (not needed for HIP)
+OpenCL-D/
+OpenCL-U/
+C++AMP/
+
+# Scripts (we add them explicitly)
+scripts/
+# But we need conversion scripts
+!automated_hip_conversion.sh
+!convert_cuda_to_hip.sh
+!port_to_hip.sh

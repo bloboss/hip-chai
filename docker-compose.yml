@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # Development environment - for conversion and development
+  chai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.hipify
+    image: chai-hipify:latest
+    container_name: chai-hip-dev
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+  # Testing environment - for compilation and testing
+  chai-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: chai-test:latest
+    container_name: chai-hip-test
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    # Optional: Add GPU access (uncomment if you have AMD GPU)
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+    # security_opt:
+    #   - seccomp:unconfined
+    # group_add:
+    #   - video
+    #   - render
+
+  # Production runtime - compiled benchmarks
+  chai-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+      target: runtime
+    image: chai-runtime:latest
+    container_name: chai-hip-runtime
+    working_dir: /workspace
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    # GPU access required for execution
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined
+    group_add:
+      - video
+      - render
+
+  # Builder - just build stage
+  chai-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+      target: builder
+    image: chai-builder:latest
+    container_name: chai-hip-builder
+    volumes:
+      - build-artifacts:/workspace/HIP-D
+    working_dir: /workspace
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+
+  # CI/CD test runner
+  chai-ci:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: chai-test:latest
+    container_name: chai-hip-ci
+    volumes:
+      - .:/workspace
+      - test-results:/workspace/test-results
+    working_dir: /workspace
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+      - CI=true
+    command: >
+      bash -c "compile_all.sh && smoke_tests.sh"
+
+volumes:
+  build-artifacts:
+    driver: local
+  test-results:
+    driver: local
+
+networks:
+  default:
+    name: chai-hip-network

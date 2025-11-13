@@ -1,0 +1,481 @@
+name: Comprehensive ROCm CI/CD
+
+on:
+  push:
+    branches: [ main, develop, claude/** ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      rocm_version:
+        description: 'ROCm version to test'
+        required: false
+        default: '6.0'
+      run_benchmarks:
+        description: 'Run actual benchmarks (requires GPU runner)'
+        required: false
+        default: 'false'
+
+env:
+  ROCM_VERSION: ${{ github.event.inputs.rocm_version || '6.0' }}
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Static code validation
+  code-validation:
+    name: Static Code Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify HIP conversion completeness
+        run: |
+          echo "=== Checking for unconverted CUDA API calls ==="
+          if grep -r "cudaMalloc\|cudaMemcpy\|cudaFree\|cudaDeviceSynchronize\|cudaGetLastError" \
+                HIP-D/ --include="*.cpp" --include="*.h" --include="*.hip" 2>/dev/null; then
+            echo "❌ Found unconverted CUDA API calls"
+            exit 1
+          fi
+          echo "✅ No CUDA API calls found"
+
+      - name: Verify all benchmarks have HIP files
+        run: |
+          echo "=== Verifying HIP file structure ==="
+          for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+            if [ ! -f "HIP-D/$benchmark/Makefile.hip" ]; then
+              echo "❌ Missing Makefile.hip for $benchmark"
+              exit 1
+            fi
+            if [ ! -f "HIP-D/$benchmark/support/hip-setup.h" ]; then
+              echo "❌ Missing hip-setup.h for $benchmark"
+              exit 1
+            fi
+            echo "✅ $benchmark has required HIP files"
+          done
+
+      - name: Check Makefile configuration
+        run: |
+          echo "=== Checking Makefile configuration ==="
+          for makefile in HIP-D/*/Makefile.hip; do
+            benchmark=$(basename $(dirname "$makefile"))
+            if ! grep -q "CXX=hipcc" "$makefile"; then
+              echo "❌ $benchmark: Makefile doesn't use hipcc"
+              exit 1
+            fi
+            if ! grep -q "lamdhip64" "$makefile"; then
+              echo "❌ $benchmark: Makefile doesn't link AMD HIP library"
+              exit 1
+            fi
+            echo "✅ $benchmark: Makefile properly configured"
+          done
+
+      - name: Verify HIP headers
+        run: |
+          echo "=== Verifying HIP header inclusion ==="
+          missing=0
+          for file in HIP-D/*/kernel.h HIP-D/*/support/timer.h; do
+            if [ -f "$file" ] && ! grep -q "hip/hip_runtime.h" "$file"; then
+              echo "⚠️  $file missing HIP header"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ $missing -gt 5 ]; then
+            echo "❌ Too many files missing HIP headers: $missing"
+            exit 1
+          fi
+          echo "✅ HIP headers properly included"
+
+      - name: Validate Docker configuration
+        run: |
+          echo "=== Validating Docker files ==="
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))"
+          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/comprehensive-rocm-ci.yml'))"
+          bash -n scripts/docker-build.sh
+          bash -n scripts/docker-test.sh
+          echo "✅ All configuration files valid"
+
+  # Build Docker images with matrix strategy
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: code-validation
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [dev, test, runtime]
+        rocm-version: ['5.7', '6.0', '6.1']
+        exclude:
+          # Runtime doesn't need all versions
+          - image: runtime
+            rocm-version: '5.7'
+          - image: runtime
+            rocm-version: '6.1'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-${{ matrix.image }}-${{ matrix.rocm-version }}
+          key: ${{ runner.os }}-buildx-${{ matrix.image }}-${{ matrix.rocm-version }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ matrix.image }}-${{ matrix.rocm-version }}-
+            ${{ runner.os }}-buildx-${{ matrix.image }}-
+
+      - name: Build ${{ matrix.image }} image (ROCm ${{ matrix.rocm-version }})
+        run: |
+          chmod +x scripts/docker-build.sh
+          ./scripts/docker-build.sh ${{ matrix.image }} ${{ matrix.rocm-version }}
+
+      - name: Verify image built successfully
+        run: |
+          docker images | grep "chai-${{ matrix.image }}"
+          docker inspect chai-${{ matrix.image }}:latest > /dev/null
+
+      - name: Test image basic functionality
+        run: |
+          if [ "${{ matrix.image }}" = "test" ] || [ "${{ matrix.image }}" = "dev" ]; then
+            docker run --rm chai-${{ matrix.image }}:latest which hipcc
+            docker run --rm chai-${{ matrix.image }}:latest hipcc --version
+            docker run --rm chai-${{ matrix.image }}:latest hip-config --version
+          fi
+
+      - name: Check image size
+        run: |
+          size=$(docker images chai-${{ matrix.image }}:latest --format "{{.Size}}")
+          echo "Image size: $size"
+          # Store for comparison
+          echo "${{ matrix.image }}-${{ matrix.rocm-version }}: $size" >> image-sizes.txt
+
+      - name: Upload image size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-size-${{ matrix.image }}-${{ matrix.rocm-version }}
+          path: image-sizes.txt
+
+      - name: Export image for later jobs
+        if: matrix.rocm-version == env.ROCM_VERSION
+        run: |
+          docker save chai-${{ matrix.image }}:latest | gzip > chai-${{ matrix.image }}.tar.gz
+
+      - name: Upload Docker image artifact
+        if: matrix.rocm-version == env.ROCM_VERSION
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-${{ matrix.image }}
+          path: chai-${{ matrix.image }}.tar.gz
+          retention-days: 1
+
+  # Compilation testing
+  compilation-test:
+    name: Compilation Test (All Benchmarks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: docker-build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-test
+
+      - name: Load Docker image
+        run: |
+          docker load < chai-test.tar.gz
+          docker images
+
+      - name: Create build output directory
+        run: mkdir -p build-logs
+
+      - name: Compile all benchmarks
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -v $(pwd)/build-logs:/build-logs \
+            chai-test:latest \
+            bash -c '
+              echo "=== Compiling all CHAI HIP benchmarks ==="
+              failed=0
+              for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+                echo ""
+                echo "=== Building $benchmark ==="
+                cd /workspace/HIP-D/$benchmark
+                if make -f Makefile.hip 2>&1 | tee /build-logs/$benchmark.log; then
+                  echo "✅ $benchmark compiled successfully"
+                else
+                  echo "❌ $benchmark compilation failed"
+                  failed=$((failed + 1))
+                fi
+              done
+
+              if [ $failed -gt 0 ]; then
+                echo "❌ $failed benchmark(s) failed to compile"
+                exit 1
+              fi
+              echo "✅ All benchmarks compiled successfully"
+            '
+
+      - name: List compiled binaries
+        run: |
+          echo "=== Compiled binaries ==="
+          find HIP-D -type f -executable -name "bfs" -o -name "sssp" -o -name "bs" -o -name "sc" | head -20
+
+      - name: Check binary sizes
+        run: |
+          echo "=== Binary sizes ==="
+          for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+            binary=$(find HIP-D/$benchmark -type f -executable 2>/dev/null | head -1)
+            if [ -n "$binary" ]; then
+              size=$(stat -f%z "$binary" 2>/dev/null || stat -c%s "$binary")
+              echo "$benchmark: $(numfmt --to=iec-i --suffix=B $size 2>/dev/null || echo $size bytes)"
+            fi
+          done
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compilation-logs
+          path: build-logs/*.log
+
+      - name: Upload compiled binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-binaries
+          path: HIP-D/*/bfs*
+
+  # Individual benchmark compilation (for better failure isolation)
+  benchmark-compilation:
+    name: Compile ${{ matrix.benchmark }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: docker-build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        benchmark: [BFS, BS, CEDD, CEDT, HSTI, HSTO, PAD, RSCD, RSCT, SC, SSSP, TQ, TQH, TRNS]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-test
+
+      - name: Load Docker image
+        run: docker load < chai-test.tar.gz
+
+      - name: Compile ${{ matrix.benchmark }}
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            chai-test:latest \
+            bash -c "
+              cd /workspace/HIP-D/${{ matrix.benchmark }}
+              echo '=== Compiling ${{ matrix.benchmark }} ==='
+              make -f Makefile.hip VERBOSE=1
+              echo '✅ ${{ matrix.benchmark }} compiled successfully'
+            "
+
+      - name: Verify binary created
+        run: |
+          binary=$(find HIP-D/${{ matrix.benchmark }} -type f -executable | head -1)
+          if [ -z "$binary" ]; then
+            echo "❌ No executable found for ${{ matrix.benchmark }}"
+            exit 1
+          fi
+          echo "✅ Binary created: $binary"
+          ls -lh "$binary"
+
+  # Smoke tests (CPU-only validation)
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: compilation-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-test
+
+      - name: Load Docker image
+        run: docker load < chai-test.tar.gz
+
+      - name: Run smoke tests
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            chai-test:latest \
+            bash -c '
+              echo "=== Running smoke tests ==="
+              cd /workspace
+
+              # Test help output (doesnt require GPU)
+              for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+                echo "Testing $benchmark --help..."
+                binary=$(find HIP-D/$benchmark -type f -executable | head -1)
+                if [ -n "$binary" ]; then
+                  timeout 5 $binary --help 2>&1 || echo "Help check complete for $benchmark"
+                fi
+              done
+
+              echo "✅ Smoke tests completed"
+            '
+
+      - name: Verify test data access
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            chai-test:latest \
+            bash -c 'ls -lh /workspace/HIP-D/*/input/ 2>/dev/null | head -20 || echo "Input data check complete"'
+
+  # Documentation and reporting
+  generate-report:
+    name: Generate Test Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [code-validation, docker-build, compilation-test, smoke-tests]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate comprehensive report
+        run: |
+          cat > test-report.md << 'EOF'
+          # CHAI HIP Benchmark Test Report
+
+          **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Commit**: ${{ github.sha }}
+          **Branch**: ${{ github.ref_name }}
+          **ROCm Version**: ${{ env.ROCM_VERSION }}
+
+          ## Summary
+
+          - **Code Validation**: ${{ needs.code-validation.result }}
+          - **Docker Build**: ${{ needs.docker-build.result }}
+          - **Compilation**: ${{ needs.compilation-test.result }}
+          - **Smoke Tests**: ${{ needs.smoke-tests.result }}
+
+          ## Docker Image Sizes
+
+          EOF
+
+          if [ -d image-size-test-6.0 ]; then
+            cat image-size-test-6.0/image-sizes.txt >> test-report.md
+          fi
+
+          cat >> test-report.md << 'EOF'
+
+          ## Compilation Results
+
+          EOF
+
+          if [ -d compilation-logs ]; then
+            echo "### Build Logs" >> test-report.md
+            for log in compilation-logs/*.log; do
+              benchmark=$(basename $log .log)
+              if grep -q "error:" "$log"; then
+                echo "- ❌ $benchmark: FAILED" >> test-report.md
+              else
+                echo "- ✅ $benchmark: SUCCESS" >> test-report.md
+              fi
+            done
+          fi
+
+          cat test-report.md
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: test-report.md
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('test-report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+
+  # Optional: GPU-based benchmark execution
+  gpu-benchmarks:
+    name: GPU Benchmark Execution
+    runs-on: [self-hosted, amd-gpu]
+    timeout-minutes: 60
+    needs: compilation-test
+    if: github.event.inputs.run_benchmarks == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download runtime image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-runtime
+
+      - name: Load Docker image
+        run: docker load < chai-runtime.tar.gz
+
+      - name: Check GPU availability
+        run: |
+          rocm-smi
+          hipconfig --full
+
+      - name: Run benchmarks on GPU
+        run: |
+          docker run --rm \
+            --device=/dev/kfd \
+            --device=/dev/dri \
+            --security-opt seccomp=unconfined \
+            --group-add video \
+            --group-add render \
+            -v $(pwd):/workspace \
+            chai-runtime:latest \
+            bash -c '
+              cd /workspace/HIP-D/BFS
+              ./bfs -n 1 -t 1
+            '
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            HIP-D/*/*.json
+            HIP-D/*/*.csv

@@ -1,0 +1,204 @@
+# Multi-stage Dockerfile for CHAI HIP Benchmarks with ROCm
+# Stage 1: Build environment
+# Stage 2: Runtime environment with compiled benchmarks
+
+#############################################
+# Stage 1: Builder - Compile all benchmarks
+#############################################
+FROM ubuntu:22.04 AS builder
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set ROCm version
+ARG ROCM_VERSION=6.0
+ENV ROCM_VERSION=${ROCM_VERSION}
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg2 \
+    software-properties-common \
+    ca-certificates \
+    curl \
+    git \
+    make \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROCm repository
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" | \
+    tee /etc/apt/sources.list.d/rocm.list
+
+# Install ROCm development tools
+RUN apt-get update && apt-get install -y \
+    rocm-dev \
+    rocm-utils \
+    hip-dev \
+    hipcc \
+    rocm-llvm \
+    rocm-cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set ROCm environment variables
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}
+ENV HIP_PATH=/opt/rocm/hip
+ENV ROCM_PATH=/opt/rocm
+ENV HIP_PLATFORM=amd
+ENV CHAI_HIP_LIB=/opt/rocm/lib
+ENV CHAI_HIP_INC=/opt/rocm/include
+
+# Create workspace
+WORKDIR /workspace
+
+# Copy source code
+COPY HIP-D /workspace/HIP-D
+COPY README.md /workspace/
+COPY HIP-CONVERSION-SUMMARY.md /workspace/
+
+# Build all benchmarks
+RUN echo "Building all HIP benchmarks..." && \
+    cd /workspace && \
+    for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do \
+        echo "Building $benchmark..."; \
+        cd HIP-D/$benchmark && \
+        if make -f Makefile.hip clean && make -f Makefile.hip; then \
+            echo "✓ $benchmark built successfully"; \
+        else \
+            echo "✗ $benchmark build failed"; \
+            exit 1; \
+        fi && \
+        cd ../..; \
+    done
+
+#############################################
+# Stage 2: Runtime - Slim image with binaries
+#############################################
+FROM ubuntu:22.04 AS runtime
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set ROCm version
+ARG ROCM_VERSION=6.0
+ENV ROCM_VERSION=${ROCM_VERSION}
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg2 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROCm repository and install runtime only
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" | \
+    tee /etc/apt/sources.list.d/rocm.list
+
+# Install ROCm runtime (no dev tools)
+RUN apt-get update && apt-get install -y \
+    rocm-core \
+    hip-runtime-amd \
+    rocm-smi-lib \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set runtime environment
+ENV PATH=/opt/rocm/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}
+ENV HIP_PATH=/opt/rocm/hip
+ENV ROCM_PATH=/opt/rocm
+ENV HIP_PLATFORM=amd
+
+# Create workspace
+WORKDIR /workspace
+
+# Copy compiled benchmarks from builder
+COPY --from=builder /workspace/HIP-D /workspace/HIP-D
+COPY --from=builder /workspace/README.md /workspace/
+COPY --from=builder /workspace/HIP-CONVERSION-SUMMARY.md /workspace/
+
+# Create test runner script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+echo "CHAI HIP Benchmark Test Runner"\n\
+echo "================================"\n\
+echo ""\n\
+\n\
+# Check ROCm\n\
+if command -v rocm-smi &> /dev/null; then\n\
+    echo "ROCm Information:"\n\
+    rocm-smi --showproductname || true\n\
+    echo ""\n\
+fi\n\
+\n\
+# Test benchmarks\n\
+BENCHMARKS=(BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS)\n\
+PASSED=0\n\
+FAILED=0\n\
+\n\
+for bench in "${BENCHMARKS[@]}"; do\n\
+    bench_lower=$(echo "$bench" | tr "[:upper:]" "[:lower:]")\n\
+    echo "Testing $bench..."\n\
+    cd HIP-D/$bench\n\
+    \n\
+    # Check if binary exists\n\
+    if [ ! -f "$bench_lower" ]; then\n\
+        echo "  ✗ Binary not found"\n\
+        ((FAILED++))\n\
+        cd ../..\n\
+        continue\n\
+    fi\n\
+    \n\
+    # Test help\n\
+    if ./$bench_lower -h > /dev/null 2>&1; then\n\
+        echo "  ✓ Help works"\n\
+    else\n\
+        echo "  ✗ Help failed"\n\
+        ((FAILED++))\n\
+        cd ../..\n\
+        continue\n\
+    fi\n\
+    \n\
+    # Test execution (with timeout)\n\
+    if timeout 60s ./$bench_lower > /dev/null 2>&1; then\n\
+        echo "  ✓ Execution successful"\n\
+        ((PASSED++))\n\
+    else\n\
+        echo "  ✗ Execution failed or timed out"\n\
+        ((FAILED++))\n\
+    fi\n\
+    \n\
+    cd ../..\n\
+done\n\
+\n\
+echo ""\n\
+echo "================================"\n\
+echo "Test Results:"\n\
+echo "  Passed: $PASSED"\n\
+echo "  Failed: $FAILED"\n\
+echo "  Total:  $((PASSED + FAILED))"\n\
+echo "================================"\n\
+\n\
+if [ $FAILED -eq 0 ]; then\n\
+    exit 0\n\
+else\n\
+    exit 1\n\
+fi\n\
+' > /usr/local/bin/run_tests.sh && chmod +x /usr/local/bin/run_tests.sh
+
+# Set default command
+CMD ["/bin/bash"]
+
+#############################################
+# Labels
+#############################################
+LABEL maintainer="CHAI HIP Port"
+LABEL description="CHAI Benchmark Suite with HIP support for AMD GPUs"
+LABEL rocm.version="${ROCM_VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/chai-benchmarks/chai"

@@ -1,0 +1,132 @@
+name: ROCm Compilation Test
+
+on:
+  push:
+    branches: [ main, develop, claude/** ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  ROCM_VERSION: '6.0'
+
+jobs:
+  compilation-test:
+    name: Compile CHAI HIP Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build test container
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.test
+          push: false
+          load: true
+          tags: chai-test:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          build-args: |
+            ROCM_VERSION=${{ env.ROCM_VERSION }}
+
+      - name: Verify container
+        run: |
+          docker run --rm chai-test:latest which hipcc
+          docker run --rm chai-test:latest hipcc --version
+
+      - name: Compile benchmarks
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            chai-test:latest \
+            compile_all.sh
+
+      - name: Run smoke tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            chai-test:latest \
+            smoke_tests.sh
+
+      - name: List compiled binaries
+        run: |
+          find HIP-D -name "bfs" -o -name "sssp" -o -name "bs" | head -5
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-logs
+          path: HIP-D/*/build.log
+
+      # Move cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  docker-build-test:
+    name: Test Docker Images Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    strategy:
+      matrix:
+        image: [dev, test]
+        rocm-version: ['6.0']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build ${{ matrix.image }} image
+        run: |
+          ./scripts/docker-build.sh ${{ matrix.image }} ${{ matrix.rocm-version }}
+
+      - name: Verify image
+        run: |
+          docker images | grep chai-
+
+  conversion-verification:
+    name: Verify CUDA to HIP Conversion
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check for CUDA remnants
+        run: |
+          echo "Checking for unconverted CUDA API calls..."
+          ! grep -r "cudaMalloc\|cudaMemcpy\|cudaFree" HIP-D/ --include="*.cpp" --include="*.h" || exit 1
+
+      - name: Verify HIP files exist
+        run: |
+          test -f HIP-D/BFS/kernel.cu.hip || exit 1
+          test -f HIP-D/BFS/Makefile.hip || exit 1
+          test -f HIP-D/BFS/support/hip-setup.h || exit 1
+
+      - name: Check Makefile syntax
+        run: |
+          for makefile in HIP-D/*/Makefile.hip; do
+            grep -q "CXX=hipcc" "$makefile" || exit 1
+            echo "✓ $makefile uses hipcc"
+          done
