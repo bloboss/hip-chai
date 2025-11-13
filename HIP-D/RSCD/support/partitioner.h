@@ -36,11 +36,11 @@
 #ifndef _PARTITIONER_H_
 #define _PARTITIONER_H_
 
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
 #include <iostream>
 #endif
 
-#if !defined(_CUDA_COMPILER_) && defined(CUDA_8_0)
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_) && defined(CUDA_8_0)
 #include <atomic>
 #endif
 
@@ -51,7 +51,7 @@ typedef struct Partitioner {
     int n_tasks;
     int cut;
     int current;
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
     int thread_id;
     int n_threads;
 #endif
@@ -60,7 +60,7 @@ typedef struct Partitioner {
 #ifdef CUDA_8_0
     // CUDA 8.0 support for dynamic partitioning
     int strategy;
-#ifdef _CUDA_COMPILER_
+#if defined(_CUDA_COMPILER_) || defined(_HIP_COMPILER_)
     int *worklist;
     int *tmp;
 #else
@@ -76,15 +76,15 @@ typedef struct Partitioner {
 
 // Create a partitioner -------------------------------------------------------
 
-#ifdef _CUDA_COMPILER_
+#if defined(_CUDA_COMPILER_) || defined(_HIP_COMPILER_)
 __device__
 #endif
 inline Partitioner partitioner_create(int n_tasks, float alpha
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
     , int thread_id, int n_threads
 #endif
 #ifdef CUDA_8_0
-#ifdef _CUDA_COMPILER_
+#if defined(_CUDA_COMPILER_) || defined(_HIP_COMPILER_)
     , int *worklist
     , int *tmp
 #else
@@ -94,7 +94,7 @@ inline Partitioner partitioner_create(int n_tasks, float alpha
     ) {
     Partitioner p;
     p.n_tasks = n_tasks;
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
     p.thread_id = thread_id;
     p.n_threads = n_threads;
 #endif
@@ -107,7 +107,7 @@ inline Partitioner partitioner_create(int n_tasks, float alpha
 #ifdef CUDA_8_0
         p.strategy = DYNAMIC_PARTITIONING;
         p.worklist = worklist;
-#ifdef _CUDA_COMPILER_
+#if defined(_CUDA_COMPILER_) || defined(_HIP_COMPILER_)
         p.tmp = tmp;
 #endif
 #endif
@@ -117,7 +117,7 @@ inline Partitioner partitioner_create(int n_tasks, float alpha
 
 // Partitioner iterators: first() ---------------------------------------------
 
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
 
 inline int cpu_first(Partitioner *p) {
 #ifdef CUDA_8_0
@@ -153,7 +153,7 @@ __device__ inline int gpu_first(Partitioner *p) {
 
 // Partitioner iterators: more() ----------------------------------------------
 
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
 
 inline bool cpu_more(const Partitioner *p) {
 #ifdef CUDA_8_0
@@ -176,7 +176,7 @@ __device__ inline bool gpu_more(const Partitioner *p) {
 
 // Partitioner iterators: next() ----------------------------------------------
 
-#ifndef _CUDA_COMPILER_
+#if !defined(_CUDA_COMPILER_) && !defined(_HIP_COMPILER_)
 
 inline int cpu_next(Partitioner *p) {
 #ifdef CUDA_8_0

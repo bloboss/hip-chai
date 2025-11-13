@@ -33,7 +33,7 @@
  *
  */
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 #include <sys/time.h>
 #include <iostream>
 #include <map>
@@ -43,31 +43,31 @@ using namespace std;
 
 struct Timer {
 
-    map<string, cudaEvent_t> startTime;
-    map<string, cudaEvent_t> stopTime;
+    map<string, hipEvent_t> startTime;
+    map<string, hipEvent_t> stopTime;
     map<string, float>         time;
 
     void start(string name) {
         if(!time.count(name)) {
-            cudaEventCreate(&startTime[name]); 
-            cudaEventCreate(&stopTime[name]);
+            hipEventCreate(&startTime[name]); 
+            hipEventCreate(&stopTime[name]);
             time[name] = 0.0;
         }
-        cudaEventRecord(startTime[name], 0);
+        hipEventRecord(startTime[name], 0);
     }
 
     void stop(string name) {
-        cudaEventRecord(stopTime[name],0);
-        cudaEventSynchronize(stopTime[name]);
+        hipEventRecord(stopTime[name],0);
+        hipEventSynchronize(stopTime[name]);
         float part_time = 0.0;
-        cudaEventElapsedTime(&part_time, startTime[name], stopTime[name]);
+        hipEventElapsedTime(&part_time, startTime[name], stopTime[name]);
         time[name] += part_time;
     }
 
     void print(string name, unsigned int REP) { printf("%s Time (ms): %f\n", name.c_str(), time[name] / REP); }
 
     void release(string name){
-        cudaEventDestroy(startTime[name]); 
-        cudaEventDestroy(stopTime[name]);
+        hipEventDestroy(startTime[name]); 
+        hipEventDestroy(stopTime[name]);
     }
 };

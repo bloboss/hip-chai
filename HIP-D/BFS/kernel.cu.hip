@@ -125,7 +125,7 @@ hipError_t call_BFS_gpu(int blocks, int threads, Node *graph_nodes_av, Edge *gra
 
     dim3 dimGrid(blocks);
     dim3 dimBlock(threads);
-    hipLaunchKernelGGL(BFS_gpu, dimGrid, dimBlock, l_mem_size, 0, graph_nodes_av, graph_edges_av, cost,
+    BFS_gpu<<<dimGrid, dimBlock, l_mem_size>>>(graph_nodes_av, graph_edges_av, cost,
         color, q1, q2, n_t,
         head, tail, threads_end, threads_run,
         overflow, iter, LIMIT, CPU);
