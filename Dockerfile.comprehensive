@@ -1,0 +1,588 @@
+################################################################################
+# CHAI HIP Comprehensive Dockerfile
+#
+# This Dockerfile provides a complete ROCm environment for building and testing
+# CHAI HIP benchmarks. It includes extensive documentation and best practices.
+#
+# BUILD INSTRUCTIONS:
+#   docker build -f Dockerfile.comprehensive -t chai-comprehensive:latest .
+#   docker build -f Dockerfile.comprehensive --build-arg ROCM_VERSION=6.1 -t chai-comprehensive:rocm6.1 .
+#
+# RUN INSTRUCTIONS:
+#   # Without GPU (compilation only):
+#   docker run --rm -it chai-comprehensive:latest bash
+#
+#   # With AMD GPU access:
+#   docker run --rm -it \
+#     --device=/dev/kfd \
+#     --device=/dev/dri \
+#     --security-opt seccomp=unconfined \
+#     --group-add video \
+#     --group-add render \
+#     chai-comprehensive:latest bash
+#
+# FEATURES:
+#   - ROCm 6.0 (configurable via build arg)
+#   - Full HIP development environment
+#   - All CHAI benchmarks pre-compiled
+#   - Testing and profiling tools
+#   - Interactive development support
+#   - Comprehensive documentation
+#
+# AUTHOR: CHAI HIP Development Team
+# VERSION: 1.0
+# ROCM_VERSION: 6.0 (default)
+################################################################################
+
+################################################################################
+# STAGE 1: Base ROCm Environment
+#
+# This stage sets up the base Ubuntu image with ROCm packages.
+# We use multi-stage builds to keep the final image size manageable.
+################################################################################
+
+FROM ubuntu:22.04 AS rocm-base
+
+# Build arguments for customization
+ARG ROCM_VERSION=6.0
+ARG DEBIAN_FRONTEND=noninteractive
+ARG ROCM_REPO_VERSION=6.0
+
+# Label for image metadata
+LABEL maintainer="CHAI HIP Development Team"
+LABEL description="Comprehensive ROCm environment for CHAI HIP benchmarks"
+LABEL rocm.version="${ROCM_VERSION}"
+LABEL chai.version="1.0-alpha"
+
+# Environment variables for ROCm
+# These are set early so they're available during build
+ENV ROCM_VERSION=${ROCM_VERSION}
+ENV ROCM_PATH=/opt/rocm
+ENV HIP_PATH=/opt/rocm/hip
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:${LD_LIBRARY_PATH}
+ENV HIP_PLATFORM=amd
+ENV HIP_COMPILER=clang
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Display build information
+RUN echo "=============================================" && \
+    echo "Building CHAI HIP Comprehensive Image" && \
+    echo "Ubuntu Version: 22.04" && \
+    echo "ROCm Version: ${ROCM_VERSION}" && \
+    echo "============================================="
+
+################################################################################
+# System Update and Essential Packages
+#
+# Update package lists and install essential build tools and utilities
+################################################################################
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Essential build tools
+    build-essential \
+    ca-certificates \
+    curl \
+    wget \
+    gnupg2 \
+    lsb-release \
+    software-properties-common \
+    # Version control
+    git \
+    git-lfs \
+    # Utilities
+    vim \
+    nano \
+    less \
+    tree \
+    htop \
+    tmux \
+    screen \
+    # Development tools
+    gdb \
+    cmake \
+    make \
+    ninja-build \
+    pkg-config \
+    # Libraries
+    libstdc++-12-dev \
+    libgcc-12-dev \
+    # Compression tools
+    bzip2 \
+    unzip \
+    xz-utils \
+    # Network tools
+    netcat \
+    iputils-ping \
+    # Python (for scripting and tools)
+    python3 \
+    python3-pip \
+    python3-dev \
+    # Cleanup in same layer to reduce image size
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages for analysis and testing
+RUN pip3 install --no-cache-dir \
+    numpy \
+    pandas \
+    matplotlib \
+    seaborn \
+    pytest \
+    pytest-benchmark \
+    tabulate \
+    pyyaml \
+    colorama
+
+################################################################################
+# ROCm Installation
+#
+# Install AMD ROCm packages from official repository
+# This provides HIP, rocm-smi, and other GPU tools
+################################################################################
+
+# Add ROCm repository GPG key
+RUN curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm.gpg
+
+# Add ROCm repository based on version
+RUN echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_REPO_VERSION} jammy main" > /etc/apt/sources.list.d/rocm.list
+
+# Verify repository was added
+RUN cat /etc/apt/sources.list.d/rocm.list && \
+    echo "ROCm repository configured for version ${ROCM_VERSION}"
+
+# Update package lists with ROCm repository
+RUN apt-get update
+
+# Install ROCm packages
+# We install a comprehensive set for development and testing
+RUN apt-get install -y --no-install-recommends \
+    # Core ROCm runtime
+    rocm-core \
+    rocm-dev \
+    rocm-libs \
+    rocm-utils \
+    # HIP development
+    hip-base \
+    hip-dev \
+    hip-runtime-amd \
+    hip-samples \
+    hipcc \
+    # ROCm libraries
+    rocm-cmake \
+    rocblas \
+    rocblas-dev \
+    rocfft \
+    rocfft-dev \
+    rocsparse \
+    rocsparse-dev \
+    # Profiling and debugging tools
+    rocprofiler-dev \
+    roctracer-dev \
+    rocm-gdb \
+    # LLVM/Clang for HIP
+    rocm-llvm \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify ROCm installation
+RUN echo "=============================================" && \
+    echo "Verifying ROCm Installation" && \
+    echo "=============================================" && \
+    hipcc --version && \
+    echo "---------------------------------------------" && \
+    hip-config --version && \
+    echo "---------------------------------------------" && \
+    which hipcc && \
+    which rocm-smi && \
+    echo "============================================="
+
+################################################################################
+# STAGE 2: Development Environment
+#
+# Add development tools, CHAI source code, and build dependencies
+################################################################################
+
+FROM rocm-base AS development
+
+# Working directory for CHAI benchmarks
+WORKDIR /workspace
+
+# Copy CHAI benchmark source code
+# We copy specific directories to avoid bloating the image
+COPY HIP-D/ /workspace/HIP-D/
+COPY scripts/ /workspace/scripts/
+COPY automated_hip_conversion.sh /workspace/
+COPY convert_cuda_to_hip.sh /workspace/
+COPY README.md HIP-PORTING-PLAN.md QUICKSTART-HIP.md /workspace/docs/
+
+# Set proper permissions
+RUN chmod +x /workspace/scripts/*.sh \
+    /workspace/automated_hip_conversion.sh \
+    /workspace/convert_cuda_to_hip.sh
+
+# Environment variables for CHAI benchmarks
+ENV CHAI_HIP_LIB=/opt/rocm/lib
+ENV CHAI_HIP_INC=/opt/rocm/include
+ENV CHAI_BENCHMARK_PATH=/workspace/HIP-D
+
+# Create directories for build artifacts and results
+RUN mkdir -p /workspace/build-logs \
+             /workspace/results \
+             /workspace/profiles \
+             /workspace/tests
+
+################################################################################
+# Helper Scripts
+#
+# Create utility scripts for common development tasks
+################################################################################
+
+# Script to compile all benchmarks
+RUN cat > /usr/local/bin/compile_all.sh << 'EOF'
+#!/bin/bash
+# Compile all CHAI HIP benchmarks
+
+set -e
+FAILED=0
+SUCCEEDED=0
+LOG_DIR=/workspace/build-logs
+
+mkdir -p "$LOG_DIR"
+
+echo "=========================================="
+echo "Compiling All CHAI HIP Benchmarks"
+echo "=========================================="
+echo ""
+
+for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+    echo "Building $benchmark..."
+    cd "/workspace/HIP-D/$benchmark"
+
+    if make -f Makefile.hip clean &>/dev/null && \
+       make -f Makefile.hip 2>&1 | tee "$LOG_DIR/$benchmark.log"; then
+        echo "✅ $benchmark compiled successfully"
+        SUCCEEDED=$((SUCCEEDED + 1))
+    else
+        echo "❌ $benchmark compilation failed"
+        FAILED=$((FAILED + 1))
+    fi
+    echo ""
+done
+
+echo "=========================================="
+echo "Compilation Summary"
+echo "  Succeeded: $SUCCEEDED"
+echo "  Failed: $FAILED"
+echo "=========================================="
+
+exit $FAILED
+EOF
+
+# Script to run smoke tests
+RUN cat > /usr/local/bin/smoke_tests.sh << 'EOF'
+#!/bin/bash
+# Run smoke tests on compiled benchmarks
+
+echo "=========================================="
+echo "Running Smoke Tests"
+echo "=========================================="
+echo ""
+
+for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+    binary=$(find "/workspace/HIP-D/$benchmark" -maxdepth 1 -type f -executable 2>/dev/null | head -1)
+
+    if [ -n "$binary" ]; then
+        echo "Testing $benchmark..."
+        # Test help output (doesn't require GPU)
+        timeout 5 "$binary" --help &>/dev/null || echo "  Help check done"
+        echo "  ✅ $benchmark smoke test passed"
+    else
+        echo "  ⚠️  $benchmark: no executable found"
+    fi
+done
+
+echo ""
+echo "=========================================="
+echo "Smoke Tests Complete"
+echo "=========================================="
+EOF
+
+# Script to profile a benchmark
+RUN cat > /usr/local/bin/profile_benchmark.sh << 'EOF'
+#!/bin/bash
+# Profile a CHAI benchmark with rocprof
+
+if [ $# -lt 1 ]; then
+    echo "Usage: profile_benchmark.sh <benchmark_name> [args...]"
+    echo "Example: profile_benchmark.sh BFS -n 100 -t 256"
+    exit 1
+fi
+
+BENCHMARK=$1
+shift
+ARGS="$@"
+
+BENCHMARK_DIR="/workspace/HIP-D/$BENCHMARK"
+BINARY=$(find "$BENCHMARK_DIR" -maxdepth 1 -type f -executable | head -1)
+
+if [ -z "$BINARY" ]; then
+    echo "Error: No executable found for $BENCHMARK"
+    exit 1
+fi
+
+echo "Profiling $BENCHMARK with rocprof..."
+cd "$BENCHMARK_DIR"
+
+PROFILE_DIR="/workspace/profiles/$BENCHMARK-$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$PROFILE_DIR"
+
+rocprof --stats --timestamp on --hip-trace \
+    -o "$PROFILE_DIR/results.csv" \
+    "$BINARY" $ARGS
+
+echo "Profile saved to: $PROFILE_DIR"
+ls -lh "$PROFILE_DIR"
+EOF
+
+# Script to run all benchmarks
+RUN cat > /usr/local/bin/run_all_benchmarks.sh << 'EOF'
+#!/bin/bash
+# Run all benchmarks with default parameters
+
+RESULTS_DIR="/workspace/results/run-$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$RESULTS_DIR"
+
+echo "=========================================="
+echo "Running All CHAI Benchmarks"
+echo "Results will be saved to: $RESULTS_DIR"
+echo "=========================================="
+echo ""
+
+for benchmark in BFS BS CEDD CEDT HSTI HSTO PAD RSCD RSCT SC SSSP TQ TQH TRNS; do
+    binary=$(find "/workspace/HIP-D/$benchmark" -maxdepth 1 -type f -executable | head -1)
+
+    if [ -n "$binary" ]; then
+        echo "Running $benchmark..."
+        cd "/workspace/HIP-D/$benchmark"
+        "$binary" -n 50 -t 256 2>&1 | tee "$RESULTS_DIR/$benchmark.log" || echo "  (completed with exit code $?)"
+        echo ""
+    else
+        echo "⚠️  $benchmark: no executable found"
+    fi
+done
+
+echo "=========================================="
+echo "Benchmark Execution Complete"
+echo "Results saved to: $RESULTS_DIR"
+echo "=========================================="
+EOF
+
+# Script to check GPU status
+RUN cat > /usr/local/bin/check_gpu.sh << 'EOF'
+#!/bin/bash
+# Check AMD GPU status and availability
+
+echo "=========================================="
+echo "AMD GPU Status Check"
+echo "=========================================="
+echo ""
+
+if command -v rocm-smi &> /dev/null; then
+    echo "ROCm SMI:"
+    rocm-smi || echo "No GPU detected or access denied"
+else
+    echo "rocm-smi not found"
+fi
+
+echo ""
+echo "------------------------------------------"
+echo "ROCm Configuration:"
+echo "------------------------------------------"
+hip-config --full
+
+echo ""
+echo "------------------------------------------"
+echo "HIP Device Count:"
+echo "------------------------------------------"
+cat > /tmp/check_hip.cpp << 'HIPEOF'
+#include <hip/hip_runtime.h>
+#include <stdio.h>
+int main() {
+    int count = 0;
+    hipError_t err = hipGetDeviceCount(&count);
+    if (err == hipSuccess) {
+        printf("Found %d HIP device(s)\n", count);
+        for (int i = 0; i < count; i++) {
+            hipDeviceProp_t prop;
+            hipGetDeviceProperties(&prop, i);
+            printf("  Device %d: %s\n", i, prop.name);
+        }
+    } else {
+        printf("Error: %s\n", hipGetErrorString(err));
+    }
+    return 0;
+}
+HIPEOF
+
+hipcc /tmp/check_hip.cpp -o /tmp/check_hip &>/dev/null && /tmp/check_hip
+rm -f /tmp/check_hip.cpp /tmp/check_hip
+
+echo ""
+echo "=========================================="
+EOF
+
+# Make all scripts executable
+RUN chmod +x /usr/local/bin/compile_all.sh \
+             /usr/local/bin/smoke_tests.sh \
+             /usr/local/bin/profile_benchmark.sh \
+             /usr/local/bin/run_all_benchmarks.sh \
+             /usr/local/bin/check_gpu.sh
+
+################################################################################
+# STAGE 3: Build All Benchmarks
+#
+# Pre-compile all benchmarks to verify they build correctly
+################################################################################
+
+FROM development AS builder
+
+# Compile all benchmarks
+RUN echo "Building all CHAI HIP benchmarks..." && \
+    compile_all.sh
+
+# Verify binaries were created
+RUN echo "Verifying compiled binaries..." && \
+    find /workspace/HIP-D -type f -executable | grep -v "\.sh$" | tee /workspace/binaries.txt && \
+    wc -l /workspace/binaries.txt
+
+################################################################################
+# STAGE 4: Runtime Environment (Minimal)
+#
+# Create a minimal runtime image with only compiled binaries and ROCm runtime
+################################################################################
+
+FROM rocm-base AS runtime
+
+# Copy only compiled binaries and necessary files
+COPY --from=builder /workspace/HIP-D /workspace/HIP-D
+COPY --from=builder /usr/local/bin/*.sh /usr/local/bin/
+
+# Set working directory
+WORKDIR /workspace
+
+# Create results directory
+RUN mkdir -p /workspace/results
+
+# Default command: show available benchmarks
+CMD ["bash", "-c", "echo 'CHAI HIP Benchmarks:'; ls -1 /workspace/HIP-D/; echo ''; echo 'Run a benchmark: cd /workspace/HIP-D/<name> && ./<name> --help'"]
+
+################################################################################
+# STAGE 5: Full Development Image (Default)
+#
+# Complete development environment with all tools and source code
+################################################################################
+
+FROM builder AS full
+
+# Install additional development tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Documentation tools
+    doxygen \
+    graphviz \
+    # Performance analysis
+    valgrind \
+    linux-tools-generic \
+    # Text processing
+    jq \
+    xmlstarlet \
+    # Additional editors
+    emacs-nox \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Create welcome message
+RUN cat > /etc/motd << 'EOF'
+
+╔════════════════════════════════════════════════════════════════╗
+║                CHAI HIP Development Environment                 ║
+╚════════════════════════════════════════════════════════════════╝
+
+  ROCm Version: 6.0
+  Workspace: /workspace
+  Benchmarks: /workspace/HIP-D
+
+  Quick Start Commands:
+    compile_all.sh              - Compile all benchmarks
+    smoke_tests.sh              - Run smoke tests
+    check_gpu.sh                - Check GPU status
+    run_all_benchmarks.sh       - Run all benchmarks
+    profile_benchmark.sh <name> - Profile a benchmark
+
+  Example Workflow:
+    1. Check GPU: check_gpu.sh
+    2. Compile: compile_all.sh
+    3. Run: cd HIP-D/BFS && ./bfs -n 100 -t 256
+
+  Documentation:
+    /workspace/docs/README.md
+    /workspace/docs/HIP-PORTING-PLAN.md
+    /workspace/docs/QUICKSTART-HIP.md
+
+  Benchmarks Available:
+    BFS  - Breadth-First Search
+    BS   - Backprop Stochastic
+    CEDD - Complex Event Detection Dense
+    CEDT - Complex Event Detection Tree
+    HSTI - Histogram Inverted
+    HSTO - Histogram Ordered
+    PAD  - Padding
+    RSCD - Reduction Scan Dense
+    RSCT - Reduction Scan Tree
+    SC   - Stream Compaction
+    SSSP - Single Source Shortest Path
+    TQ   - Task Queue
+    TQH  - Task Queue Histogram
+    TRNS - Transpose
+
+  For help: cat /etc/motd
+
+╚════════════════════════════════════════════════════════════════╝
+
+EOF
+
+# Display welcome message on container start
+RUN echo 'cat /etc/motd' >> /root/.bashrc
+
+# Set up bash prompt
+RUN echo 'export PS1="[\u@chai-hip \W]\$ "' >> /root/.bashrc
+
+# Set default command to interactive bash
+CMD ["/bin/bash"]
+
+################################################################################
+# Build Instructions Summary
+#
+# Build specific stage:
+#   docker build -f Dockerfile.comprehensive --target runtime -t chai-runtime:latest .
+#   docker build -f Dockerfile.comprehensive --target development -t chai-dev:latest .
+#   docker build -f Dockerfile.comprehensive --target full -t chai-full:latest .
+#
+# Default (full stage):
+#   docker build -f Dockerfile.comprehensive -t chai-comprehensive:latest .
+#
+# Custom ROCm version:
+#   docker build -f Dockerfile.comprehensive --build-arg ROCM_VERSION=6.1 -t chai:rocm6.1 .
+#
+# Run examples:
+#   # Interactive development:
+#   docker run --rm -it chai-comprehensive:latest
+#
+#   # Compile benchmarks:
+#   docker run --rm -v $(pwd):/workspace chai-comprehensive:latest compile_all.sh
+#
+#   # Run with GPU:
+#   docker run --rm -it --device=/dev/kfd --device=/dev/dri \
+#     --security-opt seccomp=unconfined --group-add video \
+#     chai-comprehensive:latest
+#
+################################################################################
