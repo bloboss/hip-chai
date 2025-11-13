@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # HIP development and porting environment
+  chai-hip:
+    build:
+      context: .
+      dockerfile: Dockerfile.hipify
+    image: chai-hipify:latest
+    container_name: chai-hip-dev
+
+    # GPU access for AMD GPUs
+    devices:
+      - /dev/kfd
+      - /dev/dri
+
+    # Required for ROCm
+    security_opt:
+      - seccomp:unconfined
+
+    group_add:
+      - video
+      - render
+
+    # Mount the repository
+    volumes:
+      - .:/workspace
+
+    # Set working directory
+    working_dir: /workspace
+
+    # Environment variables
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - HIP_PLATFORM=amd
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    command: /bin/bash
+
+  # Development environment without GPU (for porting only)
+  chai-hip-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.hipify
+    image: chai-hipify:latest
+    container_name: chai-hip-convert
+
+    volumes:
+      - .:/workspace
+
+    working_dir: /workspace
+
+    environment:
+      - ROCM_PATH=/opt/rocm
+      - HIP_PATH=/opt/rocm/hip
+      - CHAI_HIP_LIB=/opt/rocm/lib
+      - CHAI_HIP_INC=/opt/rocm/include
+
+    stdin_open: true
+    tty: true
+
+    command: /bin/bash
