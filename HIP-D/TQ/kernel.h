@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include <string>
 #include "support/common.h"
@@ -42,5 +42,5 @@ using namespace std;
 void host_insert_tasks(task_t *queue, int *data_queue, task_t *task_pool, int *data, int *num_written_tasks,
     int gpuQueueSize, int offset, int n_work_items);
 
-cudaError_t call_TaskQueue_gpu(int blocks, int threads, task_t *queue, int *data, int *consumed, 
+hipError_t call_TaskQueue_gpu(int blocks, int threads, task_t *queue, int *data, int *consumed, 
     int iterations, int offset, int gpuQueueSize, int l_mem_size);

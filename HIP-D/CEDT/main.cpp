@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/timer.h"
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
     Params      p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Initialize (part 1)
     timer.start("Initialization");
@@ -164,20 +164,20 @@ int main(int argc, char **argv) {
         ALLOC_ERR(h_in_out[i]);
     }
     unsigned char *d_in_out;
-    cudaStatus = cudaMalloc((void**)&d_in_out, in_size);
+    cudaStatus = hipMalloc((void**)&d_in_out, in_size);
     unsigned char *h_interm = (unsigned char *)malloc(in_size);
     ALLOC_ERR(h_interm);
     unsigned char *d_interm;
-    cudaStatus = cudaMalloc((void**)&d_interm, in_size);
+    cudaStatus = hipMalloc((void**)&d_interm, in_size);
     unsigned char *h_theta[p.n_warmup + p.n_reps];
     for(int i = 0; i < p.n_warmup + p.n_reps; i++) {
         h_theta[i] = (unsigned char *)malloc(in_size);
         ALLOC_ERR(h_theta[i]);
     }
     unsigned char *d_theta;
-    cudaStatus = cudaMalloc((void**)&d_theta, in_size);
+    cudaStatus = hipMalloc((void**)&d_theta, in_size);
     std::atomic<int> sobel_ready[p.n_warmup + p.n_reps];
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     CUDA_ERR();
     timer.stop("Allocation");
     timer.print("Allocation", 1);
@@ -212,9 +212,9 @@ int main(int argc, char **argv) {
 
                     // Move gray frame to buffer
                     timer.start("GPU Proxy: Copy To Device");
-                    cudaStatus = cudaMemcpy(d_in_out, h_in_out[rep], in_size, cudaMemcpyHostToDevice);
+                    cudaStatus = hipMemcpy(d_in_out, h_in_out[rep], in_size, hipMemcpyHostToDevice);
                     CUDA_ERR();
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     timer.stop("GPU Proxy: Copy To Device");
 
                     timer.start("GPU Proxy: Kernel");
@@ -233,15 +233,15 @@ int main(int argc, char **argv) {
                     // Kernel launch
                     cudaStatus = call_sobel_kernel(p.n_gpu_threads, d_interm, d_in_out, d_theta, 
                         rowsc, colsc, (p.n_gpu_threads + 2) * (p.n_gpu_threads + 2) * sizeof(int));
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     CUDA_ERR();
                     timer.stop("GPU Proxy: Kernel");
 
                     timer.start("GPU Proxy: Copy Back");
-                    cudaStatus = cudaMemcpy(h_in_out[rep], d_in_out, in_size, cudaMemcpyDeviceToHost);
-                    cudaStatus = cudaMemcpy(h_theta[rep], d_theta, in_size, cudaMemcpyDeviceToHost);
+                    cudaStatus = hipMemcpy(h_in_out[rep], d_in_out, in_size, hipMemcpyDeviceToHost);
+                    cudaStatus = hipMemcpy(h_theta[rep], d_theta, in_size, hipMemcpyDeviceToHost);
                     CUDA_ERR();
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     timer.stop("GPU Proxy: Copy Back");
 
                     // Release CPU proxy
@@ -267,7 +267,7 @@ int main(int argc, char **argv) {
         }));
     }
     std::for_each(proxy_threads.begin(), proxy_threads.end(), [](std::thread &t) { t.join(); });
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Total Proxies");
     timer.print("Total Proxies", 1);
     printf("CPU Proxy:\n");
@@ -315,9 +315,9 @@ int main(int argc, char **argv) {
         free(all_out_frames[i]);
     }
     free(all_out_frames);
-    cudaStatus = cudaFree(d_in_out);
-    cudaStatus = cudaFree(d_interm);
-    cudaStatus = cudaFree(d_theta);
+    cudaStatus = hipFree(d_in_out);
+    cudaStatus = hipFree(d_interm);
+    cudaStatus = hipFree(d_theta);
     CUDA_ERR();
     timer.stop("Deallocation");
     timer.print("Deallocation", 1);

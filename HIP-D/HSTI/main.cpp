@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/timer.h"
@@ -163,32 +163,32 @@ int main(int argc, char **argv) {
     const Params p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Allocate buffers
     timer.start("Allocation");
     int n_tasks = divceil(p.in_size, p.n_gpu_threads);
 #ifdef CUDA_8_0
     unsigned int *h_in;
-    cudaStatus = cudaMallocManaged(&h_in, p.in_size * sizeof(unsigned int));
+    cudaStatus = hipMallocManaged(&h_in, p.in_size * sizeof(unsigned int));
     std::atomic_uint *h_histo;
-    cudaStatus = cudaMallocManaged(&h_histo, p.n_bins * sizeof(std::atomic_uint));
+    cudaStatus = hipMallocManaged(&h_histo, p.n_bins * sizeof(std::atomic_uint));
     unsigned int *    d_in     = h_in;
     std::atomic_uint *d_histo  = h_histo;
     std::atomic_int * worklist;
-    cudaStatus = cudaMallocManaged(&worklist, sizeof(std::atomic_int));
+    cudaStatus = hipMallocManaged(&worklist, sizeof(std::atomic_int));
 #else
     unsigned int *    h_in          = (unsigned int *)malloc(p.in_size * sizeof(unsigned int));
     std::atomic_uint *h_histo       = (std::atomic_uint *)malloc(p.n_bins * sizeof(std::atomic_uint));
     unsigned int *    h_histo_merge = (unsigned int *)malloc(p.n_bins * sizeof(unsigned int));
     unsigned int *    d_in;
-    cudaStatus = cudaMalloc((void**)&d_in, p.in_size * sizeof(unsigned int));
+    cudaStatus = hipMalloc((void**)&d_in, p.in_size * sizeof(unsigned int));
     unsigned int *    d_histo;
-    cudaStatus = cudaMalloc((void**)&d_histo, p.n_bins * sizeof(unsigned int));
+    cudaStatus = hipMalloc((void**)&d_histo, p.n_bins * sizeof(unsigned int));
     ALLOC_ERR(h_in, h_histo, h_histo_merge);
 #endif
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Allocation");
     timer.print("Allocation", 1);
 
@@ -203,16 +203,16 @@ int main(int argc, char **argv) {
 #else
     memset(h_histo, 0, p.n_bins * sizeof(unsigned int));
 #endif
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Initialization");
     timer.print("Initialization", 1);
 
 #ifndef CUDA_8_0
     // Copy to device
     timer.start("Copy To Device");
-    cudaStatus = cudaMemcpy(d_in, h_in, p.in_size * sizeof(unsigned int), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_histo, h_histo, p.n_bins * sizeof(unsigned int), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
+    cudaStatus = hipMemcpy(d_in, h_in, p.in_size * sizeof(unsigned int), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_histo, h_histo, p.n_bins * sizeof(unsigned int), hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
     CUDA_ERR();
     timer.stop("Copy To Device");
     timer.print("Copy To Device", 1);
@@ -231,8 +231,8 @@ int main(int argc, char **argv) {
         }
 #else
         memset(h_histo, 0, p.n_bins * sizeof(unsigned int));
-        cudaStatus = cudaMemcpy(d_histo, h_histo, p.n_bins * sizeof(unsigned int), cudaMemcpyHostToDevice);
-        cudaDeviceSynchronize();
+        cudaStatus = hipMemcpy(d_histo, h_histo, p.n_bins * sizeof(unsigned int), hipMemcpyHostToDevice);
+        hipDeviceSynchronize();
         CUDA_ERR();
 #endif
 
@@ -261,7 +261,7 @@ int main(int argc, char **argv) {
 #endif
             );
 
-        cudaDeviceSynchronize();
+        hipDeviceSynchronize();
         main_thread.join();
 
         if(rep >= p.n_warmup)
@@ -272,9 +272,9 @@ int main(int argc, char **argv) {
 #ifndef CUDA_8_0
     // Copy back
     timer.start("Copy Back and Merge");
-    cudaStatus = cudaMemcpy(h_histo_merge, d_histo, p.n_bins * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    cudaStatus = hipMemcpy(h_histo_merge, d_histo, p.n_bins * sizeof(unsigned int), hipMemcpyDeviceToHost);
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     for(unsigned int i = 0; i < p.n_bins; ++i) {
         h_histo_merge[i] += (unsigned int)h_histo[i];
     }
@@ -292,18 +292,18 @@ int main(int argc, char **argv) {
     // Free memory
     timer.start("Deallocation");
 #ifdef CUDA_8_0
-    cudaStatus = cudaFree(h_in);
-    cudaStatus = cudaFree(h_histo);
-    cudaStatus = cudaFree(worklist);
+    cudaStatus = hipFree(h_in);
+    cudaStatus = hipFree(h_histo);
+    cudaStatus = hipFree(worklist);
 #else
     free(h_in);
     free(h_histo);
     free(h_histo_merge);
-    cudaStatus = cudaFree(d_in);
-    cudaStatus = cudaFree(d_histo);
+    cudaStatus = hipFree(d_in);
+    cudaStatus = hipFree(d_histo);
 #endif
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Deallocation");
     timer.print("Deallocation", 1);
 

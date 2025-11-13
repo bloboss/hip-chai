@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/timer.h"
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     const Params p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Allocate
     timer.start("Allocation");
@@ -208,17 +208,17 @@ int main(int argc, char **argv) {
     int best_outliers  = n_flow_vectors;
 #ifdef CUDA_8_0
     flowvector *h_flow_vector_array;
-    cudaStatus = cudaMallocManaged(&h_flow_vector_array, n_flow_vectors * sizeof(flowvector));
+    cudaStatus = hipMallocManaged(&h_flow_vector_array, n_flow_vectors * sizeof(flowvector));
     int *h_random_numbers;
-    cudaStatus = cudaMallocManaged(&h_random_numbers, 2 * p.max_iter * sizeof(int));
+    cudaStatus = hipMallocManaged(&h_random_numbers, 2 * p.max_iter * sizeof(int));
     int *h_model_candidate;
-    cudaStatus = cudaMallocManaged(&h_model_candidate, p.max_iter * sizeof(int));
+    cudaStatus = hipMallocManaged(&h_model_candidate, p.max_iter * sizeof(int));
     int *h_outliers_candidate;
-    cudaStatus = cudaMallocManaged(&h_outliers_candidate, p.max_iter * sizeof(int));
+    cudaStatus = hipMallocManaged(&h_outliers_candidate, p.max_iter * sizeof(int));
     float *h_model_param_local;
-    cudaStatus = cudaMallocManaged(&h_model_param_local, 4 * p.max_iter * sizeof(float));
+    cudaStatus = hipMallocManaged(&h_model_param_local, 4 * p.max_iter * sizeof(float));
     std::atomic_int *h_g_out_id;
-    cudaStatus = cudaMallocManaged(&h_g_out_id, sizeof(std::atomic_int));
+    cudaStatus = hipMallocManaged(&h_g_out_id, sizeof(std::atomic_int));
     flowvector *     d_flow_vector_array  = h_flow_vector_array;
     int *            d_random_numbers     = h_random_numbers;
     int *            d_model_candidate    = h_model_candidate;
@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
     float *          d_model_param_local  = h_model_param_local;
     std::atomic_int *d_g_out_id           = h_g_out_id;
     std::atomic_int * worklist;
-    cudaStatus = cudaMallocManaged(&worklist, sizeof(std::atomic_int));
+    cudaStatus = hipMallocManaged(&worklist, sizeof(std::atomic_int));
 #else
     flowvector *     h_flow_vector_array  = (flowvector *)malloc(n_flow_vectors * sizeof(flowvector));
     int *            h_random_numbers     = (int *)malloc(2 * p.max_iter * sizeof(int));
@@ -235,21 +235,21 @@ int main(int argc, char **argv) {
     float *          h_model_param_local  = (float *)malloc(4 * p.max_iter * sizeof(float));
     std::atomic_int *h_g_out_id           = (std::atomic_int *)malloc(sizeof(std::atomic_int));
     flowvector *     d_flow_vector_array;
-    cudaStatus = cudaMalloc((void**)&d_flow_vector_array, n_flow_vectors * sizeof(flowvector));
+    cudaStatus = hipMalloc((void**)&d_flow_vector_array, n_flow_vectors * sizeof(flowvector));
     int *            d_random_numbers;
-    cudaStatus = cudaMalloc((void**)&d_random_numbers, 2 * p.max_iter * sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_random_numbers, 2 * p.max_iter * sizeof(int));
     int *            d_model_candidate;
-    cudaStatus = cudaMalloc((void**)&d_model_candidate, p.max_iter * sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_model_candidate, p.max_iter * sizeof(int));
     int *            d_outliers_candidate;
-    cudaStatus = cudaMalloc((void**)&d_outliers_candidate, p.max_iter * sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_outliers_candidate, p.max_iter * sizeof(int));
     float *          d_model_param_local;
-    cudaStatus = cudaMalloc((void**)&d_model_param_local, 4 * p.max_iter * sizeof(float));
+    cudaStatus = hipMalloc((void**)&d_model_param_local, 4 * p.max_iter * sizeof(float));
     int *d_g_out_id;
-    cudaStatus = cudaMalloc((void**)&d_g_out_id, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_g_out_id, sizeof(int));
     ALLOC_ERR(h_flow_vector_array, h_random_numbers, h_model_candidate, h_outliers_candidate, h_model_param_local, h_g_out_id);
 #endif
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Allocation");
     timer.print("Allocation", 1);
 
@@ -257,20 +257,20 @@ int main(int argc, char **argv) {
     timer.start("Initialization");
     const int max_gpu_threads = setcuda.max_gpu_threads();
     read_input(h_flow_vector_array, h_random_numbers, p);
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Initialization");
     timer.print("Initialization", 1);
 
 #ifndef CUDA_8_0
     // Copy to device
     timer.start("Copy To Device");
-    cudaStatus = cudaMemcpy(d_flow_vector_array, h_flow_vector_array, n_flow_vectors * sizeof(flowvector), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_random_numbers, h_random_numbers, 2 * p.max_iter * sizeof(int), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_model_candidate, h_model_candidate, p.max_iter * sizeof(int), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_outliers_candidate, h_outliers_candidate, p.max_iter * sizeof(int), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_model_param_local, h_model_param_local, 4 * p.max_iter * sizeof(float), cudaMemcpyHostToDevice);
-    cudaStatus = cudaMemcpy(d_g_out_id, h_g_out_id, sizeof(int), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
+    cudaStatus = hipMemcpy(d_flow_vector_array, h_flow_vector_array, n_flow_vectors * sizeof(flowvector), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_random_numbers, h_random_numbers, 2 * p.max_iter * sizeof(int), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_model_candidate, h_model_candidate, p.max_iter * sizeof(int), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_outliers_candidate, h_outliers_candidate, p.max_iter * sizeof(int), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_model_param_local, h_model_param_local, 4 * p.max_iter * sizeof(float), hipMemcpyHostToDevice);
+    cudaStatus = hipMemcpy(d_g_out_id, h_g_out_id, sizeof(int), hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
     CUDA_ERR();
     timer.stop("Copy To Device");
     timer.print("Copy To Device", 1);
@@ -289,13 +289,13 @@ int main(int argc, char **argv) {
         }
 #else
         h_g_out_id[0] = 0;
-        cudaStatus = cudaMemcpy(d_model_candidate, h_model_candidate, p.max_iter * sizeof(int), cudaMemcpyHostToDevice);
-        cudaStatus = cudaMemcpy(d_outliers_candidate, h_outliers_candidate, p.max_iter * sizeof(int), cudaMemcpyHostToDevice);
-        cudaStatus = cudaMemcpy(d_model_param_local, h_model_param_local, 4 * p.max_iter * sizeof(float), cudaMemcpyHostToDevice);
-        cudaStatus = cudaMemcpy(d_g_out_id, h_g_out_id, sizeof(int), cudaMemcpyHostToDevice);
+        cudaStatus = hipMemcpy(d_model_candidate, h_model_candidate, p.max_iter * sizeof(int), hipMemcpyHostToDevice);
+        cudaStatus = hipMemcpy(d_outliers_candidate, h_outliers_candidate, p.max_iter * sizeof(int), hipMemcpyHostToDevice);
+        cudaStatus = hipMemcpy(d_model_param_local, h_model_param_local, 4 * p.max_iter * sizeof(float), hipMemcpyHostToDevice);
+        cudaStatus = hipMemcpy(d_g_out_id, h_g_out_id, sizeof(int), hipMemcpyHostToDevice);
         CUDA_ERR();
 #endif
-        cudaDeviceSynchronize();
+        hipDeviceSynchronize();
 
         if(rep >= p.n_warmup)
             timer.start("Kernel");
@@ -326,7 +326,7 @@ int main(int argc, char **argv) {
             );
 #endif
 
-        cudaDeviceSynchronize();
+        hipDeviceSynchronize();
         main_thread.join();
 
         if(rep >= p.n_warmup)
@@ -338,13 +338,13 @@ int main(int argc, char **argv) {
             timer.start("Copy Back and Merge");
         int d_candidates = 0;
         if(p.alpha < 1.0) {
-            cudaStatus = cudaMemcpy(&d_candidates, d_g_out_id, sizeof(int), cudaMemcpyDeviceToHost);
-            cudaStatus = cudaMemcpy(&h_model_candidate[h_g_out_id[0]], d_model_candidate, d_candidates * sizeof(int), cudaMemcpyDeviceToHost);
-            cudaStatus = cudaMemcpy(&h_outliers_candidate[h_g_out_id[0]], d_outliers_candidate, d_candidates * sizeof(int), cudaMemcpyDeviceToHost);
+            cudaStatus = hipMemcpy(&d_candidates, d_g_out_id, sizeof(int), hipMemcpyDeviceToHost);
+            cudaStatus = hipMemcpy(&h_model_candidate[h_g_out_id[0]], d_model_candidate, d_candidates * sizeof(int), hipMemcpyDeviceToHost);
+            cudaStatus = hipMemcpy(&h_outliers_candidate[h_g_out_id[0]], d_outliers_candidate, d_candidates * sizeof(int), hipMemcpyDeviceToHost);
             CUDA_ERR();
         }
         h_g_out_id[0] += d_candidates;
-        cudaDeviceSynchronize();
+        hipDeviceSynchronize();
         if(rep >= p.n_warmup)
             timer.stop("Copy Back and Merge");
 #endif
@@ -371,13 +371,13 @@ int main(int argc, char **argv) {
     // Free memory
     timer.start("Deallocation");
 #ifdef CUDA_8_0
-    cudaStatus = cudaFree(h_model_candidate);
-    cudaStatus = cudaFree(h_outliers_candidate);
-    cudaStatus = cudaFree(h_model_param_local);
-    cudaStatus = cudaFree(h_g_out_id);
-    cudaStatus = cudaFree(h_flow_vector_array);
-    cudaStatus = cudaFree(h_random_numbers);
-    cudaStatus = cudaFree(worklist);
+    cudaStatus = hipFree(h_model_candidate);
+    cudaStatus = hipFree(h_outliers_candidate);
+    cudaStatus = hipFree(h_model_param_local);
+    cudaStatus = hipFree(h_g_out_id);
+    cudaStatus = hipFree(h_flow_vector_array);
+    cudaStatus = hipFree(h_random_numbers);
+    cudaStatus = hipFree(worklist);
 #else
     free(h_model_candidate);
     free(h_outliers_candidate);
@@ -385,15 +385,15 @@ int main(int argc, char **argv) {
     free(h_g_out_id);
     free(h_flow_vector_array);
     free(h_random_numbers);
-    cudaStatus = cudaFree(d_model_candidate);
-    cudaStatus = cudaFree(d_outliers_candidate);
-    cudaStatus = cudaFree(d_model_param_local);
-    cudaStatus = cudaFree(d_g_out_id);
-    cudaStatus = cudaFree(d_flow_vector_array);
-    cudaStatus = cudaFree(d_random_numbers);
+    cudaStatus = hipFree(d_model_candidate);
+    cudaStatus = hipFree(d_outliers_candidate);
+    cudaStatus = hipFree(d_model_param_local);
+    cudaStatus = hipFree(d_g_out_id);
+    cudaStatus = hipFree(d_flow_vector_array);
+    cudaStatus = hipFree(d_random_numbers);
 #endif
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Deallocation");
     timer.print("Deallocation", 1);
 

@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include "support/common.h"
 
@@ -43,7 +43,7 @@ void run_cpu_threads(T *matrix_out, T *matrix, std::atomic_int *flags, int n, in
 #endif
     );
 
-cudaError_t call_Padding_kernel(int blocks, int threads, int n, int m, int pad, int n_tasks, float alpha, 
+hipError_t call_Padding_kernel(int blocks, int threads, int n, int m, int pad, int n_tasks, float alpha, 
     T *matrix_out, T *matrix, int *flags
 #ifdef CUDA_8_0
     , int l_mem_size, int *worklist

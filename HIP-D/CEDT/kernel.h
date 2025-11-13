@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include "support/common.h"
 #include <vector>
 #include <algorithm>
@@ -46,8 +46,8 @@
 void run_cpu_threads(unsigned char *buffer0, unsigned char *buffer1, unsigned char *theta, int rows, int cols,
     int num_threads, int t_index);
 
-cudaError_t call_gaussian_kernel(int threads, unsigned char *data, unsigned char *out, 
+hipError_t call_gaussian_kernel(int threads, unsigned char *data, unsigned char *out, 
     int rows, int cols, int l_mem_size);
 
-cudaError_t call_sobel_kernel(int threads, unsigned char *data, unsigned char *out, 
+hipError_t call_sobel_kernel(int threads, unsigned char *data, unsigned char *out, 
     unsigned char *theta, int rows, int cols, int l_mem_size);

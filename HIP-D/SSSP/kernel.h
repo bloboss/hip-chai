@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include "support/common.h"
 
@@ -42,7 +42,7 @@ void run_cpu_threads(Node *graph_nodes_av, Edge *graph_edges_av, std::atomic_int
     std::atomic_int *threads_end, std::atomic_int *threads_run, std::atomic_int *gray_shade,
     std::atomic_int *iter, int cpu_threads, int LIMIT, const int GPU);
 
-cudaError_t call_SSSP_gpu(int blocks, int threads, Node *graph_nodes_av, Edge *graph_edges_av, int *cost,
+hipError_t call_SSSP_gpu(int blocks, int threads, Node *graph_nodes_av, Edge *graph_edges_av, int *cost,
     int *color, int *q1, int *q2, int *n_t,
     int *head, int *tail, int *threads_end, int *threads_run,
 		int *overflow, int *gray_shade, int *iter, int LIMIT, const int CPU, int l_mem_size);

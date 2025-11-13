@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include "support/common.h"
 
@@ -44,7 +44,7 @@ void run_cpu_threads(T *output, T *input, std::atomic_int *flags, int size, int 
 #endif
     );
 
-cudaError_t call_StreamCompaction_kernel(int blocks, int threads, int size, T value, int n_tasks, float alpha, 
+hipError_t call_StreamCompaction_kernel(int blocks, int threads, int size, T value, int n_tasks, float alpha, 
     T *output, T *input, int *flags, int l_mem_size
 #ifdef CUDA_8_0
     , int *worklist

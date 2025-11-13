@@ -33,7 +33,7 @@
  *
  */
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include "support/common.h"
 
@@ -43,7 +43,7 @@ void run_cpu_threads(std::atomic_uint *histo, unsigned int *data, int size, int 
 #endif
     );
 
-cudaError_t call_Histogram_kernel(int blocks, int threads, int size, int bins, int n_tasks, float alpha, 
+hipError_t call_Histogram_kernel(int blocks, int threads, int size, int bins, int n_tasks, float alpha, 
     unsigned int *data, unsigned int *histo, int l_mem_size
 #ifdef CUDA_8_0
     , int* worklist

@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/timer.h"
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
     const Params p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Allocate
     int n_nodes, n_edges;
@@ -173,47 +173,47 @@ int main(int argc, char **argv) {
     timer.start("Allocation");
     Node * h_nodes = (Node *)malloc(sizeof(Node) * n_nodes);
     Node * d_nodes;
-    cudaStatus = cudaMalloc((void**)&d_nodes, sizeof(Node) * n_nodes);
+    cudaStatus = hipMalloc((void**)&d_nodes, sizeof(Node) * n_nodes);
     Edge * h_edges = (Edge *)malloc(sizeof(Edge) * n_edges);
     Edge * d_edges;
-    cudaStatus = cudaMalloc((void**)&d_edges, sizeof(Edge) * n_edges);
+    cudaStatus = hipMalloc((void**)&d_edges, sizeof(Edge) * n_edges);
     std::atomic_int *h_color = (std::atomic_int *)malloc(sizeof(std::atomic_int) * n_nodes);
     int * d_color;
-    cudaStatus = cudaMalloc((void**)&d_color, sizeof(int) * n_nodes);
+    cudaStatus = hipMalloc((void**)&d_color, sizeof(int) * n_nodes);
     std::atomic_int *h_cost  = (std::atomic_int *)malloc(sizeof(std::atomic_int) * n_nodes);
     int * d_cost;
-    cudaStatus = cudaMalloc((void**)&d_cost, sizeof(int) * n_nodes);
+    cudaStatus = hipMalloc((void**)&d_cost, sizeof(int) * n_nodes);
     int *            h_q1    = (int *)malloc(n_nodes * sizeof(int));
     int * d_q1;
-    cudaStatus = cudaMalloc((void**)&d_q1, sizeof(int) * n_nodes);
+    cudaStatus = hipMalloc((void**)&d_q1, sizeof(int) * n_nodes);
     int *            h_q2    = (int *)malloc(n_nodes * sizeof(int));
     int * d_q2;
-    cudaStatus = cudaMalloc((void**)&d_q2, sizeof(int) * n_nodes);
+    cudaStatus = hipMalloc((void**)&d_q2, sizeof(int) * n_nodes);
     std::atomic_int  h_head[1];
     int * d_head;
-    cudaStatus = cudaMalloc((void**)&d_head, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_head, sizeof(int));
     std::atomic_int  h_tail[1];
     int * d_tail;
-    cudaStatus = cudaMalloc((void**)&d_tail, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_tail, sizeof(int));
     std::atomic_int  h_threads_end[1];
     int * d_threads_end;
-    cudaStatus = cudaMalloc((void**)&d_threads_end, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_threads_end, sizeof(int));
     std::atomic_int  h_threads_run[1];
     int * d_threads_run;
-    cudaStatus = cudaMalloc((void**)&d_threads_run, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_threads_run, sizeof(int));
     int              h_num_t[1];
     int * d_num_t;
-    cudaStatus = cudaMalloc((void**)&d_num_t, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_num_t, sizeof(int));
     int              h_overflow[1];
     int * d_overflow;
-    cudaStatus = cudaMalloc((void**)&d_overflow, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_overflow, sizeof(int));
     std::atomic_int  h_gray_shade[1];
     int * d_gray_shade;
-    cudaStatus = cudaMalloc((void**)&d_gray_shade, sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_gray_shade, sizeof(int));
     std::atomic_int  h_iter[1];
     int * d_iter;
-    cudaStatus = cudaMalloc((void**)&d_iter, sizeof(int));
-    cudaDeviceSynchronize();
+    cudaStatus = hipMalloc((void**)&d_iter, sizeof(int));
+    hipDeviceSynchronize();
     CUDA_ERR();
     ALLOC_ERR(h_nodes, h_edges, h_color, h_cost, h_q1, h_q2);
     timer.stop("Allocation");
@@ -244,10 +244,10 @@ int main(int argc, char **argv) {
     // Copy to device
     timer.start("Copy To Device");
     cudaStatus =
-        cudaMemcpy(d_nodes, h_nodes, sizeof(Node) * n_nodes, cudaMemcpyHostToDevice);
+        hipMemcpy(d_nodes, h_nodes, sizeof(Node) * n_nodes, hipMemcpyHostToDevice);
     cudaStatus =
-        cudaMemcpy(d_edges, h_edges, sizeof(Edge) * n_edges, cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
+        hipMemcpy(d_edges, h_edges, sizeof(Edge) * n_edges, hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
     CUDA_ERR();
     timer.stop("Copy To Device");
 
@@ -352,23 +352,23 @@ int main(int argc, char **argv) {
 
                 if(rep >= p.n_warmup)
                     timer.start("Copy To Device");
-                cudaStatus = cudaMemcpy(
-                    d_cost, h_cost, sizeof(int) * n_nodes, cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_color, h_color, sizeof(int) * n_nodes, cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_threads_run, h_threads_run, sizeof(int), cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_threads_end, h_threads_end, sizeof(int), cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_overflow, h_overflow, sizeof(int), cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_q1, h_q1, sizeof(int) * n_nodes, cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_q2, h_q2, sizeof(int) * n_nodes, cudaMemcpyHostToDevice);
-                cudaStatus = cudaMemcpy(
-                    d_iter, h_iter, sizeof(int), cudaMemcpyHostToDevice);
-                cudaDeviceSynchronize();
+                cudaStatus = hipMemcpy(
+                    d_cost, h_cost, sizeof(int) * n_nodes, hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_color, h_color, sizeof(int) * n_nodes, hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_threads_run, h_threads_run, sizeof(int), hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_threads_end, h_threads_end, sizeof(int), hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_overflow, h_overflow, sizeof(int), hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_q1, h_q1, sizeof(int) * n_nodes, hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_q2, h_q2, sizeof(int) * n_nodes, hipMemcpyHostToDevice);
+                cudaStatus = hipMemcpy(
+                    d_iter, h_iter, sizeof(int), hipMemcpyHostToDevice);
+                hipDeviceSynchronize();
                 CUDA_ERR();
                 if(rep >= p.n_warmup)
                     timer.stop("Copy To Device");
@@ -388,15 +388,15 @@ int main(int argc, char **argv) {
 
                     if(rep >= p.n_warmup)
                         timer.start("Copy To Device");
-                    cudaStatus = cudaMemcpy(
-                        d_num_t, h_num_t, sizeof(int), cudaMemcpyHostToDevice);
-                    cudaStatus = cudaMemcpy(
-                        d_tail, h_tail, sizeof(int), cudaMemcpyHostToDevice);
-                    cudaStatus = cudaMemcpy(
-                        d_head, h_head, sizeof(int), cudaMemcpyHostToDevice);
-                    cudaStatus = cudaMemcpy(
-                        d_gray_shade, h_gray_shade, sizeof(int), cudaMemcpyHostToDevice);
-                    cudaDeviceSynchronize();
+                    cudaStatus = hipMemcpy(
+                        d_num_t, h_num_t, sizeof(int), hipMemcpyHostToDevice);
+                    cudaStatus = hipMemcpy(
+                        d_tail, h_tail, sizeof(int), hipMemcpyHostToDevice);
+                    cudaStatus = hipMemcpy(
+                        d_head, h_head, sizeof(int), hipMemcpyHostToDevice);
+                    cudaStatus = hipMemcpy(
+                        d_gray_shade, h_gray_shade, sizeof(int), hipMemcpyHostToDevice);
+                    hipDeviceSynchronize();
                     CUDA_ERR();
                     if(rep >= p.n_warmup)
                         timer.stop("Copy To Device");
@@ -409,18 +409,18 @@ int main(int argc, char **argv) {
                         d_color, d_qin, d_qout, d_num_t,
                         d_head, d_tail, d_threads_end, d_threads_run,
                     		d_overflow, d_gray_shade, d_iter, p.switching_limit, CPU_EXEC, sizeof(int) * (W_QUEUE_SIZE + 3));
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     CUDA_ERR();
                     if(rep >= p.n_warmup)
                         timer.stop("Kernel");
 
                     if(rep >= p.n_warmup)
                         timer.start("Copy Back and Merge");
-                    cudaStatus = cudaMemcpy(
-                        h_tail, d_tail, sizeof(int), cudaMemcpyDeviceToHost);
-                    cudaStatus = cudaMemcpy(
-                        h_iter, d_iter, sizeof(int), cudaMemcpyDeviceToHost);
-                    cudaDeviceSynchronize();
+                    cudaStatus = hipMemcpy(
+                        h_tail, d_tail, sizeof(int), hipMemcpyDeviceToHost);
+                    cudaStatus = hipMemcpy(
+                        h_iter, d_iter, sizeof(int), hipMemcpyDeviceToHost);
+                    hipDeviceSynchronize();
                     CUDA_ERR();
                     if(rep >= p.n_warmup)
                         timer.stop("Copy Back and Merge");
@@ -436,21 +436,21 @@ int main(int argc, char **argv) {
 
                 if(rep >= p.n_warmup)
                     timer.start("Copy Back and Merge");
-                cudaStatus = cudaMemcpy(
-                    h_cost, d_cost, sizeof(int) * n_nodes, cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_color, d_color, sizeof(int) * n_nodes, cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_threads_run, d_threads_run, sizeof(int), cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_threads_end, d_threads_end, sizeof(int), cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_q1, d_q1, sizeof(int) * n_nodes, cudaMemcpyDeviceToHost);
-                cudaStatus = cudaMemcpy(
-                    h_q2, d_q2, sizeof(int) * n_nodes, cudaMemcpyDeviceToHost);
-                cudaDeviceSynchronize();
+                cudaStatus = hipMemcpy(
+                    h_cost, d_cost, sizeof(int) * n_nodes, hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_color, d_color, sizeof(int) * n_nodes, hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_threads_run, d_threads_run, sizeof(int), hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_threads_end, d_threads_end, sizeof(int), hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_overflow, d_overflow, sizeof(int), hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_q1, d_q1, sizeof(int) * n_nodes, hipMemcpyDeviceToHost);
+                cudaStatus = hipMemcpy(
+                    h_q2, d_q2, sizeof(int) * n_nodes, hipMemcpyDeviceToHost);
+                hipDeviceSynchronize();
                 CUDA_ERR();
                 if(rep >= p.n_warmup)
                     timer.stop("Copy Back and Merge");
@@ -474,22 +474,22 @@ int main(int argc, char **argv) {
     free(h_cost);
     free(h_q1);
     free(h_q2);
-    cudaStatus = cudaFree(d_nodes);
-    cudaStatus = cudaFree(d_edges);
-    cudaStatus = cudaFree(d_cost);
-    cudaStatus = cudaFree(d_color);
-    cudaStatus = cudaFree(d_q1);
-    cudaStatus = cudaFree(d_q2);
-    cudaStatus = cudaFree(d_num_t);
-    cudaStatus = cudaFree(d_head);
-    cudaStatus = cudaFree(d_tail);
-    cudaStatus = cudaFree(d_threads_end);
-    cudaStatus = cudaFree(d_threads_run);
-    cudaStatus = cudaFree(d_overflow);
-    cudaStatus = cudaFree(d_iter);
-    cudaStatus = cudaFree(d_gray_shade);
+    cudaStatus = hipFree(d_nodes);
+    cudaStatus = hipFree(d_edges);
+    cudaStatus = hipFree(d_cost);
+    cudaStatus = hipFree(d_color);
+    cudaStatus = hipFree(d_q1);
+    cudaStatus = hipFree(d_q2);
+    cudaStatus = hipFree(d_num_t);
+    cudaStatus = hipFree(d_head);
+    cudaStatus = hipFree(d_tail);
+    cudaStatus = hipFree(d_threads_end);
+    cudaStatus = hipFree(d_threads_run);
+    cudaStatus = hipFree(d_overflow);
+    cudaStatus = hipFree(d_iter);
+    cudaStatus = hipFree(d_gray_shade);
     CUDA_ERR();
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Deallocation");
     timer.print("Deallocation", 1);
 

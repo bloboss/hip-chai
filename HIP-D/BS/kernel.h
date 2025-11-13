@@ -33,7 +33,7 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <atomic>
 #include "support/common.h"
 
@@ -44,7 +44,7 @@ void run_cpu_threads(XYZ *in, XYZ *out, int n_tasks, float alpha, int n_threads,
 #endif
     );
 
-cudaError_t call_Bezier_surface(int blocks, int threads, int n_tasks, float alpha,
+hipError_t call_Bezier_surface(int blocks, int threads, int n_tasks, float alpha,
     int in_size_i, int in_size_j, int out_size_i, int out_size_j, 
     int l_mem_size, XYZ* d_in, XYZ* d_out
 #ifdef CUDA_8_0

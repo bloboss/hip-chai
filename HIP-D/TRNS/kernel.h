@@ -33,12 +33,12 @@
  *
  */
 
-#include "cuda_runtime.h"
+#include <hip/hip_runtime.h>
 #include <stdlib.h>
 #include <atomic>
 #include "support/common.h"
 
 void run_cpu_threads(T *input, std::atomic_int *finished, std::atomic_int *head, int A, int B, int b, int threads);
 
-cudaError_t call_PTTWAC_soa_asta(int blocks, int threads, int A, int B, int b, T *input, 
+hipError_t call_PTTWAC_soa_asta(int blocks, int threads, int A, int B, int b, T *input, 
     int *finished, int *head, int l_mem_size);

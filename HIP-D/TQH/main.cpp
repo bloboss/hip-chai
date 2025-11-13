@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/timer.h"
@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
     const Params p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Allocate
     timer.start("Allocation");
@@ -172,19 +172,19 @@ int main(int argc, char **argv) {
     task_t *h_task_pool   = (task_t *)malloc(p.pool_size * sizeof(task_t));
     task_t *h_task_queues = (task_t *)malloc(p.queue_size * sizeof(task_t));
     task_t * d_task_queues;
-    cudaStatus = cudaMalloc((void**)&d_task_queues, p.queue_size * sizeof(task_t));
+    cudaStatus = hipMalloc((void**)&d_task_queues, p.queue_size * sizeof(task_t));
     int *   h_data_pool   = (int *)malloc(p.pool_size * frame_size * sizeof(int));
     int *   h_data_queues = (int *)malloc(p.queue_size * frame_size * sizeof(int));
     int * d_data_queues;
-    cudaStatus = cudaMalloc((void**)&d_data_queues, p.queue_size * frame_size * sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_data_queues, p.queue_size * frame_size * sizeof(int));
     int *  h_histo        = (int *)malloc(p.pool_size * p.n_bins * sizeof(int));
     int *  h_histo_queues = (int *)malloc(p.queue_size * p.n_bins * sizeof(int));
     int * d_histo_queues;
-    cudaStatus = cudaMalloc((void**)&d_histo_queues, p.queue_size * p.n_bins * sizeof(int));
+    cudaStatus = hipMalloc((void**)&d_histo_queues, p.queue_size * p.n_bins * sizeof(int));
     int *  h_consumed = (int *)malloc(sizeof(int));
     int * d_consumed;
-    cudaStatus = cudaMalloc((void**)&d_consumed, sizeof(int));
-    cudaDeviceSynchronize();
+    cudaStatus = hipMalloc((void**)&d_consumed, sizeof(int));
+    hipDeviceSynchronize();
     CUDA_ERR();
     ALLOC_ERR(h_task_pool, h_task_queues, h_data_pool, h_data_queues, h_histo, h_histo_queues, h_consumed);
     timer.stop("Allocation");
@@ -215,10 +215,10 @@ int main(int argc, char **argv) {
 
             if(rep >= p.n_warmup)
                 timer.start("Copy To Device");
-            cudaStatus = cudaMemcpy(d_task_queues, h_task_queues, p.queue_size * sizeof(task_t), cudaMemcpyHostToDevice);
-            cudaStatus = cudaMemcpy(d_data_queues, h_data_queues, p.queue_size * frame_size * sizeof(int), cudaMemcpyHostToDevice);
-            cudaStatus = cudaMemcpy(d_histo_queues, h_histo_queues, p.queue_size * p.n_bins * sizeof(int), cudaMemcpyHostToDevice);
-            cudaStatus = cudaMemcpy(d_consumed, h_consumed, sizeof(int), cudaMemcpyHostToDevice);
+            cudaStatus = hipMemcpy(d_task_queues, h_task_queues, p.queue_size * sizeof(task_t), hipMemcpyHostToDevice);
+            cudaStatus = hipMemcpy(d_data_queues, h_data_queues, p.queue_size * frame_size * sizeof(int), hipMemcpyHostToDevice);
+            cudaStatus = hipMemcpy(d_histo_queues, h_histo_queues, p.queue_size * p.n_bins * sizeof(int), hipMemcpyHostToDevice);
+            cudaStatus = hipMemcpy(d_consumed, h_consumed, sizeof(int), hipMemcpyHostToDevice);
             CUDA_ERR();
             if(rep >= p.n_warmup)
                 timer.stop("Copy To Device");
@@ -232,13 +232,13 @@ int main(int argc, char **argv) {
                 n_consumed_tasks, p.queue_size, d_consumed, frame_size, p.n_bins, 
                 sizeof(int) + sizeof(task_t) + p.n_bins * sizeof(int));
             CUDA_ERR();
-            cudaDeviceSynchronize();
+            hipDeviceSynchronize();
             if(rep >= p.n_warmup)
                 timer.stop("Kernel");
 
             if(rep >= p.n_warmup)
                 timer.start("Copy Back and Merge");
-            cudaStatus = cudaMemcpy(&h_histo[n_consumed_tasks * p.n_bins], d_histo_queues, p.queue_size * p.n_bins * sizeof(int), cudaMemcpyDeviceToHost);
+            cudaStatus = hipMemcpy(&h_histo[n_consumed_tasks * p.n_bins], d_histo_queues, p.queue_size * p.n_bins * sizeof(int), hipMemcpyDeviceToHost);
             CUDA_ERR();
             if(rep >= p.n_warmup)
                 timer.stop("Copy Back and Merge");
@@ -253,10 +253,10 @@ int main(int argc, char **argv) {
 
     // Free memory
     timer.start("Deallocation");
-    cudaStatus = cudaFree(d_task_queues);
-    cudaStatus = cudaFree(d_data_queues);
-    cudaStatus = cudaFree(d_histo_queues);
-    cudaStatus = cudaFree(d_consumed);
+    cudaStatus = hipFree(d_task_queues);
+    cudaStatus = hipFree(d_data_queues);
+    cudaStatus = hipFree(d_histo_queues);
+    cudaStatus = hipFree(d_consumed);
     CUDA_ERR();
     free(h_consumed);
     free(h_task_queues);
@@ -265,7 +265,7 @@ int main(int argc, char **argv) {
     free(h_task_pool);
     free(h_data_pool);
     free(h_histo);
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Deallocation");
     timer.print("Deallocation", 1);
 

@@ -33,7 +33,7 @@
  *
  */
 
-#include "support/cuda-setup.h"
+#include "support/hip-setup.h"
 #include "kernel.h"
 #include "support/common.h"
 #include "support/partitioner.h"
@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
     Params      p(argc, argv);
     CUDASetup    setcuda(p.device);
     Timer        timer;
-    cudaError_t  cudaStatus;
+    hipError_t  cudaStatus;
 
     // Initialize (part 1)
     timer.start("Initialization");
@@ -177,22 +177,22 @@ int main(int argc, char **argv) {
     unsigned char *    h_in_out[2];
     h_in_out[CPU_PROXY] = (unsigned char *)malloc(in_size);
 #ifdef CUDA_8_0
-    cudaStatus = cudaMallocManaged(&h_in_out[GPU_PROXY], in_size);
+    cudaStatus = hipMallocManaged(&h_in_out[GPU_PROXY], in_size);
     unsigned char *d_in_out = h_in_out[GPU_PROXY];
 #else
     h_in_out[GPU_PROXY] = (unsigned char *)malloc(in_size);
     unsigned char * d_in_out;
-    cudaStatus = cudaMalloc((void**)&d_in_out, in_size);
+    cudaStatus = hipMalloc((void**)&d_in_out, in_size);
     ALLOC_ERR(h_in_out[GPU_PROXY]);
 #endif
     unsigned char *h_interm_cpu_proxy = (unsigned char *)malloc(in_size);
     unsigned char *h_theta_cpu_proxy  = (unsigned char *)malloc(in_size);
     unsigned char *d_interm_gpu_proxy;
-    cudaStatus = cudaMalloc((void**)&d_interm_gpu_proxy, in_size);
+    cudaStatus = hipMalloc((void**)&d_interm_gpu_proxy, in_size);
     unsigned char *d_theta_gpu_proxy;
-    cudaStatus = cudaMalloc((void**)&d_theta_gpu_proxy, in_size);
+    cudaStatus = hipMalloc((void**)&d_theta_gpu_proxy, in_size);
     std::atomic<int> next_frame;
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     ALLOC_ERR(h_in_out[CPU_PROXY], h_interm_cpu_proxy, h_theta_cpu_proxy);
     CUDA_ERR();
     timer.stop("Allocation");
@@ -229,9 +229,9 @@ int main(int argc, char **argv) {
 #ifndef CUDA_8_0
                     // Copy to Device
                     timer.start("GPU Proxy: Copy To Device");
-                    cudaStatus = cudaMemcpy(d_in_out, h_in_out[proxy_tid], in_size, cudaMemcpyHostToDevice);
+                    cudaStatus = hipMemcpy(d_in_out, h_in_out[proxy_tid], in_size, hipMemcpyHostToDevice);
                     CUDA_ERR();
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     timer.stop("GPU Proxy: Copy To Device");
 #endif
 
@@ -269,14 +269,14 @@ int main(int argc, char **argv) {
                         rowsc, colsc);
                     CUDA_ERR();
 
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     timer.stop("GPU Proxy: Kernel");
 
 #ifndef CUDA_8_0
                     timer.start("GPU Proxy: Copy Back");
-                    cudaStatus = cudaMemcpy(h_in_out[proxy_tid], d_in_out, in_size, cudaMemcpyDeviceToHost);
+                    cudaStatus = hipMemcpy(h_in_out[proxy_tid], d_in_out, in_size, hipMemcpyDeviceToHost);
                     CUDA_ERR();
-                    cudaDeviceSynchronize();
+                    hipDeviceSynchronize();
                     timer.stop("GPU Proxy: Copy Back");
 #endif
 
@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
         }));
     }
     std::for_each(proxy_threads.begin(), proxy_threads.end(), [](std::thread &t) { t.join(); });
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
     timer.stop("Total Proxies");
     timer.print("Total Proxies", 1);
     printf("CPU Proxy:\n");
@@ -341,10 +341,10 @@ int main(int argc, char **argv) {
     // Release buffers
     timer.start("Deallocation");
 #ifdef CUDA_8_0
-    cudaStatus = cudaFree(h_in_out[GPU_PROXY]);
+    cudaStatus = hipFree(h_in_out[GPU_PROXY]);
 #else
     free(h_in_out[GPU_PROXY]);
-    cudaStatus = cudaFree(d_in_out);
+    cudaStatus = hipFree(d_in_out);
 #endif
     free(h_in_out[CPU_PROXY]);
     free(h_interm_cpu_proxy);
@@ -357,8 +357,8 @@ int main(int argc, char **argv) {
         free(all_out_frames[i]);
     }
     free(all_out_frames);
-    cudaStatus = cudaFree(d_interm_gpu_proxy);
-    cudaStatus = cudaFree(d_theta_gpu_proxy);
+    cudaStatus = hipFree(d_interm_gpu_proxy);
+    cudaStatus = hipFree(d_theta_gpu_proxy);
     CUDA_ERR();
     free(worklist);
     timer.stop("Deallocation");
